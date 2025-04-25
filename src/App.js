@@ -9,15 +9,11 @@ import {
   List,
   ListItem,
   ListItemText,
-  IconButton,
   Box,
   Paper,
-  Checkbox,
-  FormControlLabel,
   Tabs,
   Tab,
 } from "@mui/material";
-import ThumbUpIcon from "@mui/icons-material/ThumbUp";
 
 import { initializeApp } from "firebase/app";
 import {
@@ -26,10 +22,7 @@ import {
   addDoc,
   getDocs,
   updateDoc,
-  doc,
-  getDoc,
-  setDoc,
-  writeBatch,
+  doc
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -114,31 +107,6 @@ function App() {
     }
 
     fetchNominations();
-  };
-
-  const toggleWatched = async (id, currentWatched) => {
-    const ref = doc(db, "nominations", id);
-    await updateDoc(ref, { watched: !currentWatched });
-    fetchNominations();
-  };
-
-  const resetVotes = async () => {
-    // Reset all movie votes to 0
-    const nominationsSnapshot = await getDocs(collection(db, "nominations"));
-    const batch = writeBatch(db);
-    nominationsSnapshot.forEach((doc) => {
-      batch.update(doc.ref, { votes: 0 });
-    });
-
-    // Clear all user votes
-    const votesSnapshot = await getDocs(collection(db, "votes"));
-    votesSnapshot.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-
-    await batch.commit();
-    fetchNominations();
-    alert("Votes have been reset!");
   };
 
   const handleTabChange = (event, newValue) => {
