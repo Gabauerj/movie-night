@@ -125,7 +125,7 @@ function App() {
     <Container maxWidth="sm">
       <Box mt={4} mb={2}>
         <Typography variant="h4" gutterBottom>
-          🎬 Movie Night Nominations
+          🎬 Jims Movie Voting
         </Typography>
         <Tabs
           value={activeTab}
