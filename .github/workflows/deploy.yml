@@ -27,13 +27,11 @@ jobs:
         run: |
           git config --global user.email "gabauerj@gmail.com"
           git config --global user.name "james"
-          git config --global url.https://${{ secrets.GITHUB_TOKEN }}@github.com/.insteadOf https://github.com/
-
 
       - name: Deploy to GitHub Pages
         run: |
           npm install -g gh-pages
-          gh-pages -d build
+          gh-pages -d build -r https://github.com/${{ github.repository }}.git -b gh-pages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REACT_APP_OMDB_API_KEY: ${{ secrets.REACT_APP_OMDB_API_KEY }}
