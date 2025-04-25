@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useDebounce } from './hooks/useDebounce';
 import ReactDOM from "react-dom/client";
 import {
   Container,
@@ -11,9 +12,10 @@ import {
   IconButton,
   Box,
   Paper,
-  MenuItem,
   Checkbox,
   FormControlLabel,
+  Tabs,
+  Tab,
 } from "@mui/material";
 import ThumbUpIcon from "@mui/icons-material/ThumbUp";
 
@@ -25,6 +27,9 @@ import {
   getDocs,
   updateDoc,
   doc,
+  getDoc,
+  setDoc,
+  writeBatch,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -36,7 +41,6 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
 
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -47,6 +51,10 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState(null);
   const [nominations, setNominations] = useState([]);
+  const [activeTab, setActiveTab] = useState(0); // State to track the active tab
+  const [votesUsed, setVotesUsed] = useState(0);
+
+  const debouncedSearch = useDebounce(search, 500);
 
   const fetchNominations = async () => {
     const snapshot = await getDocs(collection(db, "nominations"));
@@ -55,6 +63,10 @@ function App() {
   };
 
   const searchMovies = async (query) => {
+    if (!query) {
+      setSearchResults([]);
+      return;
+    }
     const response = await fetch(
       `https://www.omdbapi.com/?apikey=${OMDB_API_KEY}&s=${encodeURIComponent(
         query
@@ -74,8 +86,9 @@ function App() {
     await addDoc(collection(db, "nominations"), {
       movie: selectedMovie.Title,
       imdbID: selectedMovie.imdbID,
+      poster: selectedMovie.Poster, // Save the poster URL
       votes: 0,
-      watched: false, // Add a watched field
+      watched: false,
     });
 
     setSearch("");
@@ -84,9 +97,22 @@ function App() {
     fetchNominations();
   };
 
-  const vote = async (id, currentVotes) => {
-    const ref = doc(db, "nominations", id);
-    await updateDoc(ref, { votes: currentVotes + 1 });
+  const vote = async (id, newVotes) => {
+    if (newVotes < 0) return; // Prevent negative votes
+
+    if (newVotes > nominations.find((item) => item.id === id).votes && votesUsed >= 5) {
+      alert("You have used all your votes for this session!");
+      return;
+    }
+
+    const movieRef = doc(db, "nominations", id);
+    await updateDoc(movieRef, { votes: newVotes });
+
+    // Update session votes only when incrementing
+    if (newVotes > nominations.find((item) => item.id === id).votes) {
+      setVotesUsed(votesUsed + 1);
+    }
+
     fetchNominations();
   };
 
@@ -96,9 +122,36 @@ function App() {
     fetchNominations();
   };
 
+  const resetVotes = async () => {
+    // Reset all movie votes to 0
+    const nominationsSnapshot = await getDocs(collection(db, "nominations"));
+    const batch = writeBatch(db);
+    nominationsSnapshot.forEach((doc) => {
+      batch.update(doc.ref, { votes: 0 });
+    });
+
+    // Clear all user votes
+    const votesSnapshot = await getDocs(collection(db, "votes"));
+    votesSnapshot.forEach((doc) => {
+      batch.delete(doc.ref);
+    });
+
+    await batch.commit();
+    fetchNominations();
+    alert("Votes have been reset!");
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+
   useEffect(() => {
     fetchNominations();
   }, []);
+
+  useEffect(() => {
+    searchMovies(debouncedSearch);
+  }, [debouncedSearch]);
 
   return (
     <Container maxWidth="sm">
@@ -106,72 +159,183 @@ function App() {
         <Typography variant="h4" gutterBottom>
           🎬 Movie Night Nominations
         </Typography>
-        <Paper sx={{ p: 2, mb: 2 }}>
-          <TextField
-            label="Search Movie"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              searchMovies(e.target.value);
-            }}
-            fullWidth
-            margin="normal"
-          />
-          {searchResults.length > 0 && (
+        <Tabs
+          value={activeTab}
+          onChange={handleTabChange}
+          indicatorColor="primary"
+          textColor="primary"
+          centered
+        >
+          <Tab label="Search" />
+          <Tab label="Nominations" />
+        </Tabs>
+        {activeTab === 0 && (
+          <Paper sx={{ p: 2, mt: 2 }}>
             <TextField
-              select
-              label="Select a Movie"
-              value={selectedMovie?.imdbID || ""}
-              onChange={(e) =>
-                setSelectedMovie(
-                  searchResults.find((m) => m.imdbID === e.target.value)
-                )
-              }
+              label="Search Movie"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               fullWidth
               margin="normal"
-            >
-              {searchResults.map((movie) => (
-                <MenuItem key={movie.imdbID} value={movie.imdbID}>
-                  {movie.Title} ({movie.Year})
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
-          <Button
-            variant="contained"
-            onClick={submitNomination}
-            sx={{ mt: 1 }}
-            fullWidth
-          >
-            Nominate
-          </Button>
-        </Paper>
-        <Typography variant="h6" gutterBottom>
-          Current Nominations
-        </Typography>
-        <List>
-          {nominations.map((item) => (
-            <ListItem key={item.id}>
-              <ListItemText
-                primary={`${item.movie} (${item.votes} votes)`}
-                secondary={`IMDb: ${item.imdbID}`}
-              />
-              <IconButton edge="end" onClick={() => vote(item.id, item.votes)}>
-                <ThumbUpIcon />
-              </IconButton>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={item.watched}
-                    onChange={() => toggleWatched(item.id, item.watched)}
-                    name="watched"
-                  />
-                }
-                label="Watched"
-              />
-            </ListItem>
-          ))}
-        </List>
+            />
+            {searchResults.length > 0 && (
+              <List>
+                {searchResults.map((movie) => {
+                  const isNominated = nominations.some(
+                    (nomination) => nomination.imdbID === movie.imdbID
+                  );
+
+                  return (
+                    <ListItem
+                      key={movie.imdbID}
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        border: "1px solid #ddd",
+                        borderRadius: "8px",
+                        mb: 1,
+                        p: 1,
+                      }}
+                    >
+                      {movie.Poster !== "N/A" && (
+                        <img
+                          src={movie.Poster}
+                          alt={movie.Title}
+                          style={{
+                            width: "60px",
+                            height: "90px",
+                            objectFit: "cover",
+                            borderRadius: "4px",
+                            marginRight: "16px",
+                          }}
+                        />
+                      )}
+                      <ListItemText
+                        primary={movie.Title}
+                        secondary={movie.Year}
+                        sx={{ flex: 1, marginLeft: "16px" }}
+                      />
+                      {isNominated ? (
+                        <Typography
+                          variant="body2"
+                          color="textSecondary"
+                          sx={{ marginRight: "16px" }}
+                        >
+                          Already Nominated
+                        </Typography>
+                      ) : (
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => {
+                            console.log("Selected Movie:", movie); // Debugging log
+                            setSelectedMovie(movie);
+                            submitNomination();
+                          }}
+                        >
+                          Nominate
+                        </Button>
+                      )}
+                    </ListItem>
+                  );
+                })}
+              </List>
+            )}
+            {selectedMovie && (
+              <Button
+                variant="contained"
+                onClick={submitNomination}
+                sx={{ mt: 2 }}
+                fullWidth
+              >
+                Confirm Nomination
+              </Button>
+            )}
+          </Paper>
+        )}
+        {activeTab === 1 && (
+          <Paper sx={{ p: 2, mt: 2 }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Typography variant="h6" gutterBottom>
+                Current Nominations
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {`Votes Used: ${votesUsed}/5`}
+              </Typography>
+            </Box>
+            {nominations.length > 0 ? (
+              <List>
+                {nominations
+                  .filter((item) => item.imdbID && item.imdbID.trim() !== "")
+                  .sort((a, b) => b.votes - a.votes)
+                  .map((item) => (
+                    <ListItem
+                      key={item.id}
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        border: "1px solid #ddd",
+                        borderRadius: "8px",
+                        mb: 1,
+                        p: 1,
+                      }}
+                    >
+                      {item.poster && (
+                        <img
+                          src={item.poster}
+                          alt={item.movie}
+                          style={{
+                            width: "60px",
+                            height: "90px",
+                            objectFit: "cover",
+                            borderRadius: "4px",
+                            marginRight: "16px",
+                          }}
+                        />
+                      )}
+                      <ListItemText
+                        primary={item.movie}
+                        secondary={`${item.votes} votes`}
+                        sx={{ flex: 1, marginLeft: "16px" }}
+                      />
+                      <Box sx={{ display: "flex", alignItems: "center" }}>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => vote(item.id, item.votes - 1)}
+                          disabled={item.votes <= 0} // Disable if votes are 0
+                          sx={{ minWidth: "30px", padding: "0 8px" }}
+                        >
+                          -
+                        </Button>
+                        <Typography
+                          variant="body1"
+                          sx={{ mx: 2, minWidth: "30px", textAlign: "center" }}
+                        >
+                          {item.votes}
+                        </Typography>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => vote(item.id, item.votes + 1)}
+                          disabled={votesUsed >= 5} // Disable if user has used all votes
+                          sx={{ minWidth: "30px", padding: "0 8px" }}
+                        >
+                          +
+                        </Button>
+                      </Box>
+                    </ListItem>
+                  ))}
+              </List>
+            ) : (
+              <Typography variant="body2" color="textSecondary">
+                No nominations yet.
+              </Typography>
+            )}
+          </Paper>
+        )}
       </Box>
     </Container>
   );
